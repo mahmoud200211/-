@@ -85,8 +85,19 @@ async function loadData() {
     const mosque = (m || '').trim(), name = (s || '').trim();
     if (!mosque || !name) continue;
     const M = (MOS[mosque] ||= (MOSQUES.push({ name: mosque, area: (a || '').trim(), students: [], trainers: [] }), MOSQUES[MOSQUES.length - 1]));
-    M.students.push({ key: mosque + '|' + name, name, mosque, area: M.area });
-    for (const t of (sup || '').split('|')) { const n = t.trim(); if (n && !M.trainers.includes(n)) M.trainers.push(n); }
+    M.students.push({ key: mosque + '|' + name, name, mosque, area: M.area, sup: (sup || '').split('|').map((x) => x.trim()).filter(Boolean) });
+    for (const n of M.students[M.students.length - 1].sup) if (!M.trainers.includes(n)) M.trainers.push(n);
+  }
+  // طالبان بنفس الاسم في المسجد: نميّزهما بالمشرف ونعطي كل واحد مفتاحاً مستقلاً
+  for (const M of MOSQUES) {
+    const count = {}; M.students.forEach((s) => (count[s.name] = (count[s.name] || 0) + 1));
+    const seen = {};
+    for (const s of M.students) {
+      if (count[s.name] < 2) continue;
+      seen[s.name] = (seen[s.name] || 0) + 1;
+      s.key = M.name + '|' + s.name + '#' + seen[s.name];
+      s.name = s.name + (s.sup.length ? ' (مجموعة ' + s.sup.join(' و') + ')' : ' (' + seen[s.name] + ')');
+    }
   }
 }
 

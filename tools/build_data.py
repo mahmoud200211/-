@@ -7,7 +7,7 @@ src = sys.argv[1]
 out = sys.argv[2] if len(sys.argv) > 2 else "data/students.csv"
 wb = openpyxl.load_workbook(src, data_only=True)
 clean = lambda s: re.sub(r"\s+", " ", str(s or "")).strip()
-rows = {}
+rows = []
 for ws in wb:
     for r in list(ws.iter_rows(values_only=True))[1:]:
         r = list(r) + [None] * 5
@@ -15,13 +15,11 @@ for ws in wb:
         if not name:
             continue
         mosque = mosque or clean(ws.title)
-        item = rows.setdefault((mosque, name), {"area": area, "sups": []})
-        for s in re.split(r"[،,]", sup):
-            if clean(s) and clean(s) not in item["sups"]:
-                item["sups"].append(clean(s))
+        sups = [clean(x) for x in re.split(r"[،,]", sup) if clean(x)]
+        rows.append((mosque, area, name, sups))  # كل صف طالب مستقل، حتى لو تكرر الاسم
 with open(out, "w", newline="", encoding="utf-8-sig") as f:
     w = csv.writer(f)
     w.writerow(["المسجد", "المنطقة", "الطالب", "المشرف"])
-    for (m, n), v in rows.items():
-        w.writerow([m, v["area"], n, "|".join(v["sups"])])
+    for m, a, n, sups in rows:
+        w.writerow([m, a, n, "|".join(sups)])
 print(len(rows), "طالب ->", out)
