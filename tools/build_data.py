@@ -1,13 +1,13 @@
 # يحوّل ملف Excel (ورقة لكل مسجد) إلى data/students.csv
 # الاستخدام:  python3 tools/build_data.py "ملف الأسماء.xlsx"
+# الأعمدة الناتجة: المسجد، المنطقة، الطالب، المشرف (عدة مشرفين تُفصل بـ |)
 import sys, csv, re, openpyxl
 
-NO_SUP = "مشرف غير محدد"
 src = sys.argv[1]
 out = sys.argv[2] if len(sys.argv) > 2 else "data/students.csv"
 wb = openpyxl.load_workbook(src, data_only=True)
-rows, seen = [], set()
 clean = lambda s: re.sub(r"\s+", " ", str(s or "")).strip()
+rows = {}
 for ws in wb:
     for r in list(ws.iter_rows(values_only=True))[1:]:
         r = list(r) + [None] * 5
@@ -15,15 +15,13 @@ for ws in wb:
         if not name:
             continue
         mosque = mosque or clean(ws.title)
-        trainers = [clean(t) for t in re.split(r"[،,]", sup) if clean(t)] or [f"{NO_SUP} - {mosque}"]
-        for t in trainers:
-            k = (t, mosque, name)
-            if k in seen:
-                print("تكرار:", k); continue
-            seen.add(k)
-            rows.append([t, mosque, area, name])
+        item = rows.setdefault((mosque, name), {"area": area, "sups": []})
+        for s in re.split(r"[،,]", sup):
+            if clean(s) and clean(s) not in item["sups"]:
+                item["sups"].append(clean(s))
 with open(out, "w", newline="", encoding="utf-8-sig") as f:
     w = csv.writer(f)
-    w.writerow(["المدرب", "المسجد", "المنطقة", "الطالب"])
-    w.writerows(rows)
-print(len(rows), "صف ->", out)
+    w.writerow(["المسجد", "المنطقة", "الطالب", "المشرف"])
+    for (m, n), v in rows.items():
+        w.writerow([m, v["area"], n, "|".join(v["sups"])])
+print(len(rows), "طالب ->", out)

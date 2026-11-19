@@ -1,7 +1,7 @@
 /**
  * استقبال التقييمات وكتابتها في Google Sheet.
  * الصق هذا الكود كاملاً في Apps Script داخل الـ Sheet (Extensions > Apps Script).
- * الأوراق تُنشأ تلقائياً: "تقييم الطلاب" و "تقييم المدربين".
+ * الأوراق تُنشأ تلقائياً: "تقييم الطلاب" و "معلومات المدربين".
  */
 const STUDENT_COLS = [ // [الحقل، عنوان العمود]
   ['time', 'الوقت'], ['trainer', 'المدرب'], ['mosque', 'المسجد'], ['area', 'المنطقة'], ['student', 'الطالب'],
@@ -9,14 +9,14 @@ const STUDENT_COLS = [ // [الحقل، عنوان العمود]
   ['recommend', 'ترشيح للمستوى 2'], ['key', 'المفتاح'],
 ];
 const TRAINER_COLS = [
-  ['time', 'الوقت'], ['trainer', 'المدرب'], ['trainability', 'قابلية التدريب'], ['newTrainings', 'المشاركة في تدريبات جديدة'],
+  ['time', 'الوقت'], ['trainer', 'المدرب'], ['mosque', 'المسجد'], ['trainability', 'قابلية التدريب'], ['newTrainings', 'المشاركة في تدريبات جديدة'],
   ['major', 'الاختصاص الجامعي'], ['year', 'السنة'], ['trained', 'عدد الطلاب المدرَّبين سابقاً'],
   ['skill_prog', 'البرمجة'], ['skill_ai', 'الذكاء الاصطناعي'], ['skill_mech', 'الميكانيك'], ['skill_3d', 'الطباعة 3D'],
   ['skill_office', 'الأدوات المكتبية'], ['skill_robot', 'الروبوت'], ['otherSkills', 'مهارات أخرى'],
 ];
 const SHEETS = {
   student: { name: 'تقييم الطلاب', cols: STUDENT_COLS, keyField: 'key' },
-  trainer: { name: 'تقييم المدربين', cols: TRAINER_COLS, keyField: 'trainer' },
+  trainer: { name: 'معلومات المدربين', cols: TRAINER_COLS, keyField: 'trainer' },
 };
 
 function getSheet_(kind) {

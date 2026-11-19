@@ -2,29 +2,33 @@
 /* ===================== الإعدادات (عدّل هنا فقط) ===================== */
 const CONFIG = {
   PROJECT_NAME: 'تقييم المدربين والطلاب في المساجد', // عنوان الصفحة في المتصفح
-  ACADEMY_NAME: 'ROBOGEEX academy',   // يظهر بجانب الشعار
-  APPS_SCRIPT_URL: 'https://script.google.com/macros/s/AKfycbxI0EzNBRz5rEHZyUsVokO5WBAHKuU59Yp1IhguFZ9EiGBE3g-ulLBF08MmIW7R--ME/exec',              // رابط Google Apps Script بعد النشر (انظر README.md)
+  ACADEMY_NAME: 'ROBOGEEX academy',   // يظهر بدل الشعار إذا تعذّر تحميله
+  APPS_SCRIPT_URL: 'https://script.google.com/macros/s/AKfycbxI0EzNBRz5rEHZyUsVokO5WBAHKuU59Yp1IhguFZ9EiGBE3g-ulLBF08MmIW7R--ME/exec',
   CSV_URL: 'data/students.csv',     // ملف الأسماء
 };
 const OPTIONS = {
-  majors: ['هندسة حاسوب', 'هندسة كهرباء', 'هندسة ميكانيك', 'علوم حاسوب', 'تقنية معلومات', 'أخرى'],
+  majors: ['هندسة حاسوب', 'هندسة كهرباء', 'هندسة ميكانيك', 'علوم حاسوب', 'تقنية معلومات'],
   years: ['أولى', 'ثانية', 'ثالثة', 'رابعة', 'خامسة', 'خريج'],
   trained: ['0', '1-10', '11-30', '31-60', 'أكثر من 60'],
-  otherSkills: ['تصميم', 'مونتاج', 'كهرباء', 'لحام', 'لغات', 'إلقاء', 'تصوير', 'أخرى'],
+  otherSkills: ['تصميم', 'مونتاج', 'كهرباء', 'لحام', 'لغات', 'إلقاء', 'تصوير'],
 };
+const SECTIONS = { students: 'تقييم الطلاب', trainer: 'معلومات عن المدرب' };
 
 /* ===================== تعريف النماذج ===================== */
 const YN = ['نعم', 'لا'];
-const STUDENT_FIELDS = [
+const nameField = (m) => ({ id: 'trainer', label: 'اسم المدرب', type: 'choice', options: m.trainers, own: 'اكتب اسمك إن لم تجده في القائمة' });
+const studentFields = (m) => [
+  nameField(m),
   { id: 'attendance', label: 'الالتزام بالحضور', type: 'rate' },
   { id: 'programming', label: 'المستوى البرمجي', type: 'rate' },
   { id: 'creativity', label: 'الإبداع', type: 'rate' },
   { id: 'recommend', label: 'هل ترشّح الطالب للمستوى 2؟', type: 'choice', options: YN, yn: true },
 ];
-const TRAINER_FIELDS = [
+const trainerFields = (m) => [
+  nameField(m),
   { id: 'trainability', label: 'قابلية التدريب', type: 'rate' },
   { id: 'newTrainings', label: 'قابلية المشاركة في تدريبات جديدة', type: 'choice', options: ['نعم', 'لا', 'ربما'], yn: true },
-  { id: 'major', label: 'الاختصاص الجامعي', type: 'choice', options: OPTIONS.majors },
+  { id: 'major', label: 'الاختصاص الجامعي', type: 'choice', options: OPTIONS.majors, own: 'اكتب اختصاصاً آخر' },
   { id: 'year', label: 'السنة الجامعية', type: 'choice', options: OPTIONS.years },
   { id: 'trained', label: 'عدد الطلاب الذين دربتهم سابقاً', type: 'choice', options: OPTIONS.trained },
   { id: 'skill_prog', label: 'البرمجة', type: 'rate', group: 'مستوى المهارات' },
@@ -33,8 +37,9 @@ const TRAINER_FIELDS = [
   { id: 'skill_3d', label: 'الطباعة ثلاثية الأبعاد', type: 'rate', group: 'مستوى المهارات' },
   { id: 'skill_office', label: 'الأدوات المكتبية', type: 'rate', group: 'مستوى المهارات' },
   { id: 'skill_robot', label: 'الروبوت', type: 'rate', group: 'مستوى المهارات' },
-  { id: 'otherSkills', label: 'مهارات أخرى (اختياري)', type: 'multi', options: OPTIONS.otherSkills, optional: true },
+  { id: 'otherSkills', label: 'مهارات أخرى (اختياري)', type: 'multi', options: OPTIONS.otherSkills, own: 'أضف مهارة أخرى', optional: true },
 ];
+const fieldsOf = (f) => (f.kind === 'student' ? studentFields : trainerFields)(MOS[f.mosque]);
 
 /* ===================== أدوات مساعدة ===================== */
 const $ = (s) => document.querySelector(s);
@@ -63,29 +68,25 @@ function parseCSV(t) {
   row.push(f); if (row.some((x) => x.trim())) rows.push(row);
   return rows;
 }
-let toastTimer;
-function toast(msg) {
-  const el = $('#toast'); el.textContent = msg; el.hidden = false;
-  clearTimeout(toastTimer); toastTimer = setTimeout(() => (el.hidden = true), 2600);
-}
 
 /* ===================== الحالة ===================== */
-let TRAINERS = {};           // اسم المدرب -> { name, students:[{key,name,mosque,area}], mosques:[] }
-let store = LS.get('mev1', { students: {}, trainers: {}, queue: [], me: null });
-const persist = () => LS.set('mev1', store);
-const ui = { view: 'pick', tab: 'students', mosque: null, onlyPending: false, form: null, done: null };
+let MOSQUES = [];             // [{ name, area, students:[{key,name,mosque,area}], trainers:[أسماء] }]
+const MOS = {};               // اسم المسجد -> نفس الكائن
+let store = LS.get('mev2', { students: {}, trainers: {}, queue: [], me: null });
+const persist = () => LS.set('mev2', store);
+const ui = { view: 'home', section: 'students', mosque: null, onlyPending: false, search: '', form: null, done: null };
 
 /* ===================== تحميل البيانات ===================== */
 async function loadData() {
   const r = await fetch(CONFIG.CSV_URL, { cache: 'no-cache' });
   if (!r.ok) throw new Error('csv');
   const rows = parseCSV(await r.text()); rows.shift();
-  for (const [t, m, a, s] of rows) {
-    const trainer = (t || '').trim(), mosque = (m || '').trim(), name = (s || '').trim();
-    if (!trainer || !name) continue;
-    const T = (TRAINERS[trainer] ||= { name: trainer, students: [], mosques: [] });
-    T.students.push({ key: mosque + '|' + name, name, mosque, area: (a || '').trim() });
-    if (!T.mosques.includes(mosque)) T.mosques.push(mosque);
+  for (const [m, a, s, sup] of rows) {
+    const mosque = (m || '').trim(), name = (s || '').trim();
+    if (!mosque || !name) continue;
+    const M = (MOS[mosque] ||= (MOSQUES.push({ name: mosque, area: (a || '').trim(), students: [], trainers: [] }), MOSQUES[MOSQUES.length - 1]));
+    M.students.push({ key: mosque + '|' + name, name, mosque, area: M.area });
+    for (const t of (sup || '').split('|')) { const n = t.trim(); if (n && !M.trainers.includes(n)) M.trainers.push(n); }
   }
 }
 
@@ -114,13 +115,13 @@ async function pullRemote() {
     for (const [k, v] of Object.entries(j.students || {})) if (!queued.has('student|' + k)) store.students[k] = v;
     for (const [k, v] of Object.entries(j.trainers || {})) if (!queued.has('trainer|' + k)) store.trainers[k] = v;
     persist();
-    if (ui.view === 'main') render();
+    if (ui.view === 'home' || ui.view === 'list') render();
   } catch (e) { /* بدون إنترنت */ }
 }
 function updateBanner() {
   const b = $('#banner');
   if (!CONFIG.APPS_SCRIPT_URL) { b.textContent = 'وضع تجريبي: التقييمات تُحفظ على هذا الجهاز فقط ولا تصل إلى الجدول.'; b.className = 'banner'; b.hidden = false; }
-  else if (store.queue.length) { b.textContent = `⏳ ${store.queue.length} تقييم بانتظار الإرسال (سيُرسل تلقائياً عند توفر الإنترنت)`; b.className = 'banner warn'; b.hidden = false; }
+  else if (store.queue.length) { b.textContent = `⏳ ${store.queue.length} بانتظار الإرسال (سيُرسل تلقائياً عند توفر الإنترنت)`; b.className = 'banner warn'; b.hidden = false; }
   else b.hidden = true;
 }
 function save(kind, key, data) {
@@ -131,143 +132,141 @@ function save(kind, key, data) {
   persist(); updateBanner(); flush();
 }
 
-/* ===================== الواجهات ===================== */
-function render() {
-  const app = $('#app');
-  ({ pick: viewPick, main: viewMain, form: viewForm, done: viewDone }[ui.view])(app);
-}
+/* ===================== التنقل ===================== */
+const parent = (v) => ({ list: 'home', form: ui.form && ui.form.kind === 'student' ? 'list' : 'home', done: ui.done && ui.done.kind === 'student' ? 'list' : 'home' }[v] || 'home');
+function render() { ({ home: viewHome, list: viewList, form: viewForm, done: viewDone }[ui.view])($('#app')); }
 function go(view) { ui.view = view; render(); window.scrollTo(0, 0); }
-
-/* --- اختيار المدرب --- */
-function viewPick(app) {
-  app.innerHTML = `
-    <h2>مرحباً بك 👋</h2>
-    <p class="sub">ابحث عن اسمك واضغط عليه</p>
-    <div class="search"><input id="q" type="search" placeholder="🔍  اكتب جزءاً من اسمك" autocomplete="off"></div>
-    <div id="tlist" class="list"></div>`;
-  const draw = () => {
-    const q = norm($('#q').value);
-    const items = Object.values(TRAINERS).filter((t) => norm(t.name).includes(q)).sort((a, b) => a.name.localeCompare(b.name, 'ar'));
-    $('#tlist').innerHTML = items.length ? items.map((t) => `
-      <button class="row" data-act="pick" data-name="${esc(t.name)}">
-        <span><span class="name">${esc(t.name)}</span><br><span class="meta">${t.students.length} طالب · ${t.mosques.map(esc).join('، ')}</span></span>
-        <span aria-hidden="true">‹</span>
-      </button>`).join('') : '<p class="empty">لا يوجد اسم مطابق</p>';
-  };
-  $('#q').addEventListener('input', draw); draw();
+function back() { history.state && history.state.v ? history.back() : go(parent(ui.view)); }
+function resetAll() {
+  Object.assign(ui, { view: 'home', section: 'students', mosque: null, onlyPending: false, search: '', form: null, done: null });
+  go('home');
 }
 
-/* --- الصفحة الرئيسية للمدرب --- */
-function viewMain(app) {
-  const T = TRAINERS[store.me];
-  if (!T) { store.me = null; persist(); return go('pick'); }
-  if (!ui.mosque || !T.mosques.includes(ui.mosque)) ui.mosque = T.mosques.length === 1 ? T.mosques[0] : null;
-  let body = '';
-  if (ui.tab === 'students') {
-    body = `<div class="sec-title">${T.mosques.length > 1 ? 'اختر المسجد' : 'المسجد'}</div>
-      <div class="chips">${T.mosques.map((m) => {
-        const all = T.students.filter((s) => s.mosque === m), done = all.filter((s) => store.students[s.key]).length;
-        return `<button class="chip ${m === ui.mosque ? 'on' : ''}" data-act="mosque" data-m="${esc(m)}">${esc(m)} · ${done}/${all.length}</button>`;
-      }).join('')}</div>`;
-    if (ui.mosque) {
-      const all = T.students.filter((s) => s.mosque === ui.mosque), done = all.filter((s) => store.students[s.key]).length;
-      const shown = ui.onlyPending ? all.filter((s) => !store.students[s.key]) : all;
-      body += `<div class="progress-line"><span>تم تقييم ${done} من ${all.length}</span><span>${Math.round(done / all.length * 100)}%</span></div>
-        <div class="bar"><i style="width:${done / all.length * 100}%"></i></div>
-        <div class="toggle"><button class="chip sm ${ui.onlyPending ? 'on' : ''}" data-act="pending">لم يُقيَّم بعد فقط</button></div>
-        <div class="list">${shown.length ? shown.map((s) => {
-          const ok = !!store.students[s.key];
-          return `<button class="row" data-act="student" data-key="${esc(s.key)}">
-            <span class="name">${esc(s.name)}</span><span class="badge ${ok ? 'ok' : ''}">${ok ? 'تم تقييمه ✓' : 'لم يُقيَّم'}</span></button>`;
-        }).join('') : '<p class="empty">🎉 تم تقييم جميع الطلاب</p>'}</div>`;
-    } else body += '<p class="empty">اختر المسجد لعرض الطلاب</p>';
-  } else {
-    const ev = store.trainers[store.me];
-    body = `<div class="card"><h2>تقييم المدرب (أنا)</h2>
-      <p class="sub">${ev ? 'تم تعبئة تقييمك مسبقاً ✓ — يمكنك تعديله.' : 'لم تعبّئ تقييمك بعد. يستغرق دقيقة واحدة.'}</p>
-      <button class="btn" data-act="trainer-form">${ev ? 'تعديل تقييمي' : 'ابدأ التعبئة'}</button></div>`;
-  }
+/* --- الصفحة الأولى: اختيار القسم ثم المسجد --- */
+function viewHome(app) {
+  const stu = ui.section === 'students';
   app.innerHTML = `
-    <div class="who"><span>المدرب: <b>${esc(T.name)}</b></span><button class="link" data-act="switch">تغيير</button></div>
-    <div class="tabs"><button class="tab ${ui.tab === 'students' ? 'on' : ''}" data-act="tab" data-t="students">تقييم الطلاب</button>
-      <button class="tab ${ui.tab === 'trainer' ? 'on' : ''}" data-act="tab" data-t="trainer">تقييم المدرب (أنا)</button></div>${body}`;
+    <div class="seg" role="group" aria-label="القسم">${Object.entries(SECTIONS).map(([k, v]) =>
+      `<button class="seg-btn ${ui.section === k ? 'on' : ''}" data-act="section" data-s="${k}">${v}</button>`).join('')}</div>
+    <div class="sec-title">${stu ? 'اختر المسجد لعرض طلابه' : 'اختر المسجد الذي تدرّب فيه'}</div>
+    <div class="list">${MOSQUES.map((m) => {
+      const done = m.students.filter((s) => store.students[s.key]).length, n = m.students.length;
+      return `<button class="mosque" data-act="mosque" data-m="${esc(m.name)}">
+        <span class="mtext"><span class="mname">${esc(m.name)}</span>
+          <span class="meta">${esc(m.area)} · ${n} طالب</span>
+          ${stu ? `<span class="mprog"><span class="bar"><i style="width:${n ? done / n * 100 : 0}%"></i></span><span class="meta">تم تقييم ${done} من ${n}</span></span>` : ''}</span>
+        <span class="chev" aria-hidden="true">‹</span></button>`;
+    }).join('')}</div>`;
+}
+
+/* --- قائمة طلاب المسجد --- */
+function viewList(app) {
+  const M = MOS[ui.mosque];
+  const done = M.students.filter((s) => store.students[s.key]).length, n = M.students.length;
+  app.innerHTML = `
+    <button class="back" data-act="back">→ الرئيسية</button>
+    <h2>${esc(M.name)}</h2><p class="sub">${esc(M.area)}</p>
+    <div class="progress-line"><span>تم تقييم ${done} من ${n}</span><span>${Math.round(done / n * 100)}%</span></div>
+    <div class="bar"><i style="width:${done / n * 100}%"></i></div>
+    <div class="search"><input id="sq" type="search" placeholder="🔍  ابحث عن اسم طالب" autocomplete="off" value="${esc(ui.search)}"></div>
+    <div class="toggle"><button class="chip sm ${ui.onlyPending ? 'on' : ''}" data-act="pending">لم يُقيَّم بعد فقط</button></div>
+    <div id="slist" class="list"></div>`;
+  const draw = () => {
+    ui.search = $('#sq').value;
+    const q = norm(ui.search);
+    const shown = M.students.filter((s) => norm(s.name).includes(q) && (!ui.onlyPending || !store.students[s.key]));
+    $('#slist').innerHTML = shown.length ? shown.map((s) => {
+      const ok = !!store.students[s.key];
+      return `<button class="row" data-act="student" data-key="${esc(s.key)}">
+        <span class="name">${esc(s.name)}</span><span class="badge ${ok ? 'ok' : ''}">${ok ? 'تم تقييمه ✓' : 'لم يُقيَّم'}</span></button>`;
+    }).join('') : `<p class="empty">${q || ui.onlyPending ? 'لا يوجد طالب مطابق' : 'لا يوجد طلاب'}</p>`;
+  };
+  $('#sq').addEventListener('input', draw); draw();
 }
 
 /* --- النماذج --- */
-function openForm(kind, key) {
-  const prev = kind === 'student' ? store.students[key] : store.trainers[key];
-  ui.form = { kind, key, values: prev ? { ...prev } : {} };
+function openForm(kind, key, mosque) {
+  let values = {};
+  if (kind === 'student') values = { ...(store.students[key] || {}) };
+  else if (store.me && store.trainers[store.me]) values = { ...store.trainers[store.me] };
+  if (store.me) values.trainer = store.me;
+  ui.form = { kind, key, mosque, values };
   history.pushState({ v: 'form' }, '');
   go('form');
 }
-function fieldHTML(f, v) {
-  const on = (x) => (v === x ? 'on' : '');
+function bodyHTML(f, v) {
+  let html = '';
   if (f.type === 'rate') {
-    return `<div class="rate" data-id="${f.id}">${[1, 2, 3, 4, 5].map((n) => `<button type="button" data-act="set" data-id="${f.id}" data-v="${n}" class="${on(n)}" aria-label="${n}">${n}</button>`).join('')}</div>
+    html = `<div class="rate">${[1, 2, 3, 4, 5].map((n) => `<button type="button" data-act="set" data-id="${f.id}" data-v="${n}" class="${v === n ? 'on' : ''}" aria-label="${n}">${n}</button>`).join('')}</div>
       <div class="scale"><span>ضعيف</span><span>ممتاز</span></div>`;
+  } else if (f.type === 'choice') {
+    const opts = f.options.slice(); if (v != null && v !== '' && !opts.includes(v)) opts.push(v);
+    html = `<div class="${f.yn ? 'yn' : 'chips'}">${opts.map((o) => `<button type="button" class="chip ${v === o ? 'on' : ''}" data-act="set" data-id="${f.id}" data-v="${esc(o)}">${esc(o)}</button>`).join('')}</div>`;
+  } else {
+    const arr = Array.isArray(v) ? v : [], opts = f.options.concat(arr.filter((x) => !f.options.includes(x)));
+    html = `<div class="chips">${opts.map((o) => `<button type="button" class="chip ${arr.includes(o) ? 'on' : ''}" data-act="toggle" data-id="${f.id}" data-v="${esc(o)}">${esc(o)}</button>`).join('')}</div>`;
   }
-  if (f.type === 'choice') {
-    return `<div class="${f.yn ? 'yn' : 'chips'}" data-id="${f.id}">${f.options.map((o) => `<button type="button" class="chip ${on(o)}" data-act="set" data-id="${f.id}" data-v="${esc(o)}">${esc(o)}</button>`).join('')}</div>`;
-  }
-  const arr = Array.isArray(v) ? v : [];
-  return `<div class="chips">${f.options.map((o) => `<button type="button" class="chip ${arr.includes(o) ? 'on' : ''}" data-act="toggle" data-id="${f.id}" data-v="${esc(o)}">${esc(o)}</button>`).join('')}</div>`;
+  if (f.own) html += `<div class="own"><input id="own-${f.id}" data-own="${f.id}" type="text" maxlength="60" placeholder="${esc(f.own)}" autocomplete="off"><button type="button" class="add" data-act="add-own" data-id="${f.id}">إضافة</button></div>`;
+  return html;
 }
+function refreshField(f) { $(`[data-field="${f.id}"] .body`).innerHTML = bodyHTML(f, ui.form.values[f.id]); }
 function viewForm(app) {
-  const { kind, key, values } = ui.form;
-  const fields = kind === 'student' ? STUDENT_FIELDS : TRAINER_FIELDS;
+  const { kind, key, mosque, values } = ui.form;
   let html = '', lastGroup = null;
-  for (const f of fields) {
+  for (const f of fieldsOf(ui.form)) {
     if (f.group && f.group !== lastGroup) html += `<div class="sec-title">${f.group}</div>`;
     lastGroup = f.group || null;
-    html += `<div class="field ${f.group ? 'group-item' : ''}"><div class="lbl">${f.label}</div>${fieldHTML(f, values[f.id])}</div>`;
+    html += `<div class="field ${f.group ? 'group-item' : ''}" data-field="${f.id}"><div class="lbl">${f.label}</div><div class="body">${bodyHTML(f, values[f.id])}</div></div>`;
   }
-  let title, sub;
-  if (kind === 'student') {
-    const s = TRAINERS[store.me].students.find((x) => x.key === key);
-    title = s.name; sub = s.mosque;
-  } else { title = 'تقييم المدرب'; sub = store.me; }
+  const title = kind === 'student' ? MOS[mosque].students.find((x) => x.key === key).name : 'معلومات عن المدرب';
   app.innerHTML = `
     <div class="formtop"><button class="back" data-act="back">→ رجوع</button>
-      <div class="who-name">${esc(title)}</div><div class="sub" style="margin:0">${esc(sub)}</div>
+      <div class="who-name">${esc(title)}</div><div class="sub" style="margin:0">${esc(mosque)}</div>
       <div class="progress-line"><span id="ptxt"></span></div><div class="bar"><i id="pbar"></i></div></div>
     ${html}
-    <div class="submit-wrap"><div class="inner"><button id="submit" class="btn" data-act="submit" disabled>${kind === 'student' ? 'حفظ التقييم' : 'حفظ تقييمي'}</button></div></div>`;
+    <div class="submit-wrap"><div class="inner"><button id="submit" class="btn" data-act="submit" disabled>${kind === 'student' ? 'حفظ التقييم' : 'حفظ المعلومات'}</button></div></div>`;
   updateProgress();
 }
-function requiredFields() { return (ui.form.kind === 'student' ? STUDENT_FIELDS : TRAINER_FIELDS).filter((f) => !f.optional); }
+const filled = (v) => v != null && v !== '' && !(Array.isArray(v) && !v.length);
 function updateProgress() {
-  const req = requiredFields(), n = req.filter((f) => ui.form.values[f.id] != null).length;
+  const req = fieldsOf(ui.form).filter((f) => !f.optional), n = req.filter((f) => filled(ui.form.values[f.id])).length;
   $('#ptxt').textContent = `تمت تعبئة ${n} من ${req.length}`;
   $('#pbar').style.width = (n / req.length * 100) + '%';
   $('#submit').disabled = n < req.length;
 }
+function onNameChosen() {
+  const f = ui.form; if (f.kind !== 'trainer') return;
+  const prev = store.trainers[f.values.trainer];
+  if (prev && Object.keys(f.values).every((k) => k === 'trainer')) { f.values = { ...prev, trainer: f.values.trainer }; viewForm($('#app')); }
+}
 function submitForm() {
-  const { kind, key, values } = ui.form;
+  const { kind, key, mosque, values } = ui.form;
   const data = {};
-  for (const f of (kind === 'student' ? STUDENT_FIELDS : TRAINER_FIELDS)) if (values[f.id] != null) data[f.id] = values[f.id];
-  if (kind === 'student') {
-    const s = TRAINERS[store.me].students.find((x) => x.key === key);
-    Object.assign(data, { trainer: store.me, mosque: s.mosque, area: s.area, student: s.name });
-  } else data.trainer = store.me;
-  save(kind, key, data);
-  ui.done = { kind, key };
+  for (const f of fieldsOf(ui.form)) if (filled(values[f.id])) data[f.id] = values[f.id];
+  data.mosque = mosque;
+  let k = key;
+  if (kind === 'student') { const s = MOS[mosque].students.find((x) => x.key === key); Object.assign(data, { area: s.area, student: s.name }); }
+  else k = data.trainer;
+  store.me = data.trainer; persist();
+  save(kind, k, data);
+  ui.done = { kind, key: k, mosque };
   history.replaceState({ v: 'done' }, '');
   go('done');
 }
 function nextPending() {
-  const T = TRAINERS[store.me];
-  return T.students.find((s) => s.mosque === ui.mosque && !store.students[s.key] && s.key !== ui.done.key);
+  const list = MOS[ui.done.mosque].students, i = list.findIndex((s) => s.key === ui.done.key);
+  return list.slice(i + 1).concat(list.slice(0, i + 1)).find((s) => !store.students[s.key]);
 }
 function viewDone(app) {
   const isStudent = ui.done.kind === 'student';
   const next = isStudent ? nextPending() : null;
   const offline = store.queue.length || !CONFIG.APPS_SCRIPT_URL;
   app.innerHTML = `<div class="done"><div class="tick">✓</div>
-    <h2>تم حفظ ${isStudent ? 'التقييم' : 'تقييمك'} بنجاح</h2>
-    <p class="sub">${offline ? 'سيُرسل إلى الجدول تلقائياً عند توفر الاتصال.' : 'شكراً لك، وصل التقييم إلى الجدول.'}</p>
+    <h2>${isStudent ? 'تم حفظ التقييم بنجاح' : 'تم حفظ معلوماتك بنجاح'}</h2>
+    <p class="sub">${offline ? 'سيُرسل إلى الجدول تلقائياً عند توفر الاتصال.' : 'شكراً لك، وصلت البيانات إلى الجدول.'}</p>
     <div class="stack">
       ${next ? `<button class="btn" data-act="next" data-key="${esc(next.key)}">تقييم الطالب التالي: ${esc(next.name)}</button>` : ''}
-      <button class="btn ${next ? 'alt' : ''}" data-act="list">العودة إلى القائمة</button></div></div>`;
+      <button class="btn ${next ? 'alt' : ''}" data-act="back">${isStudent ? 'العودة إلى قائمة الطلاب' : 'العودة إلى الصفحة الأولى'}</button></div></div>`;
 }
 
 /* ===================== الأحداث ===================== */
@@ -275,32 +274,43 @@ document.addEventListener('click', (e) => {
   const el = e.target.closest('[data-act]'); if (!el) return;
   const d = el.dataset;
   switch (d.act) {
-    case 'pick': store.me = d.name; persist(); ui.tab = 'students'; ui.mosque = null; go('main'); break;
-    case 'switch': store.me = null; persist(); go('pick'); break;
-    case 'tab': ui.tab = d.t; render(); break;
-    case 'mosque': ui.mosque = d.m; render(); break;
+    case 'reset': resetAll(); break;
+    case 'section': ui.section = d.s; render(); break;
+    case 'mosque':
+      if (ui.section === 'students') { ui.mosque = d.m; ui.search = ''; ui.onlyPending = false; history.pushState({ v: 'list' }, ''); go('list'); }
+      else openForm('trainer', null, d.m);
+      break;
     case 'pending': ui.onlyPending = !ui.onlyPending; render(); break;
-    case 'student': openForm('student', d.key); break;
-    case 'trainer-form': openForm('trainer', store.me); break;
-    case 'back': history.state && history.state.v ? history.back() : go('main'); break;
-    case 'list': history.state && history.state.v ? history.back() : go('main'); break;
-    case 'next': ui.form = { kind: 'student', key: d.key, values: { ...(store.students[d.key] || {}) } };
+    case 'student': openForm('student', d.key, ui.mosque); break;
+    case 'back': back(); break;
+    case 'next':
+      ui.form = { kind: 'student', key: d.key, mosque: ui.done.mosque, values: { ...(store.students[d.key] || {}), ...(store.me ? { trainer: store.me } : {}) } };
       history.replaceState({ v: 'form' }, ''); go('form'); break;
     case 'set': {
-      const f = ui.form, v = /^[1-5]$/.test(d.v) && el.closest('.rate') ? Number(d.v) : d.v;
-      f.values[d.id] = v;
+      const f = ui.form, isRate = !!el.closest('.rate');
+      f.values[d.id] = isRate ? Number(d.v) : d.v;
       el.parentElement.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b === el));
-      updateProgress(); break;
+      updateProgress(); if (d.id === 'trainer') onNameChosen(); break;
     }
     case 'toggle': {
       const f = ui.form, arr = Array.isArray(f.values[d.id]) ? f.values[d.id] : [];
       f.values[d.id] = arr.includes(d.v) ? arr.filter((x) => x !== d.v) : [...arr, d.v];
       el.classList.toggle('on'); break;
     }
+    case 'add-own': {
+      const input = $(`#own-${d.id}`), v = input.value.replace(/\s+/g, ' ').trim(); if (!v) return;
+      const f = fieldsOf(ui.form).find((x) => x.id === d.id), vals = ui.form.values;
+      if (f.type === 'multi') { const arr = Array.isArray(vals[d.id]) ? vals[d.id].slice() : []; if (!arr.includes(v)) arr.push(v); vals[d.id] = arr; }
+      else vals[d.id] = v;
+      refreshField(f); updateProgress(); if (d.id === 'trainer') onNameChosen(); break;
+    }
     case 'submit': submitForm(); break;
   }
 });
-window.addEventListener('popstate', () => { if (ui.view === 'form' || ui.view === 'done') go('main'); });
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && e.target.dataset && e.target.dataset.own) { e.preventDefault(); e.target.closest('.own').querySelector('[data-act="add-own"]').click(); }
+});
+window.addEventListener('popstate', () => { if (ui.view !== 'home') go(parent(ui.view)); });
 window.addEventListener('online', () => { flush(); pullRemote(); });
 
 /* ===================== البدء ===================== */
@@ -310,6 +320,5 @@ window.addEventListener('online', () => { flush(); pullRemote(); });
   updateBanner();
   try { await loadData(); }
   catch (e) { $('#app').innerHTML = '<p class="empty">تعذّر تحميل ملف الأسماء (data/students.csv).<br>إذا فتحت الملف مباشرة من الجهاز، انشره على GitHub Pages أو شغّل خادماً محلياً.</p>'; return; }
-  ui.view = store.me && TRAINERS[store.me] ? 'main' : 'pick';
   render(); flush(); pullRemote();
 })();
