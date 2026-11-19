@@ -1,10 +1,10 @@
 'use strict';
 /* ===================== الإعدادات (عدّل هنا فقط) ===================== */
 const CONFIG = {
-  VERSION: '3',                     // يظهر أسفل الصفحة؛ زِده عند كل تحديث (وغيّر ?v= في index.html)
+  VERSION: '4',                     // يظهر أسفل الصفحة؛ زِده عند كل تحديث (وغيّر ?v= في index.html)
   PROJECT_NAME: 'تقييم المدربين والطلاب في المساجد',
   ACADEMY_NAME: 'ROBOGEEX academy',   // يظهر بدل الشعار إذا تعذّر تحميله
-  APPS_SCRIPT_URL: 'https://script.google.com/macros/s/AKfycbwfknWGPWZm2WJsnETI8s8vkDv-NIuMoYfWWr0MLiNsnKLsOa3Xm99F59LHO3064l4e/exec',
+  APPS_SCRIPT_URL: 'https://script.google.com/macros/s/AKfycbxwlUYloTVJyk6GtQGWaehq4zJw6EVI9ygcYN0-G2vcQCCZZu0vrhqV9HLezFbtxLQR/exec',
   CSV_URL: 'data/students.csv',     // ملف الأسماء
   // طلاب المدرب بعد إدخال الرمز: 'mosque' = كل طلاب مسجده، 'supervisor' = الطلاب المسجّل اسمه مشرفاً عليهم فقط
   STUDENTS_SCOPE: 'mosque',
