@@ -3,7 +3,7 @@
 const CONFIG = {
   PROJECT_NAME: 'تقييم المدربين والطلاب في المساجد', // عنوان الصفحة في المتصفح
   ACADEMY_NAME: 'ROBOGEEX academy',   // يظهر بدل الشعار إذا تعذّر تحميله
-  APPS_SCRIPT_URL: 'https://script.google.com/macros/s/AKfycbxI0EzNBRz5rEHZyUsVokO5WBAHKuU59Yp1IhguFZ9EiGBE3g-ulLBF08MmIW7R--ME/exec',
+  APPS_SCRIPT_URL: 'https://script.google.com/macros/s/AKfycbwfknWGPWZm2WJsnETI8s8vkDv-NIuMoYfWWr0MLiNsnKLsOa3Xm99F59LHO3064l4e/exec',
   CSV_URL: 'data/students.csv',     // ملف الأسماء
 };
 const OPTIONS = {
