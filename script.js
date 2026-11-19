@@ -2,7 +2,7 @@
 /* ===================== الإعدادات (عدّل هنا فقط) ===================== */
 const CONFIG = {
   PROJECT_NAME: 'تقييم المدربين والطلاب في المساجد', // عنوان الصفحة في المتصفح
-  ACADEMY_NAME: 'جيكس أكاديمي',   // يظهر بجانب الشعار
+  ACADEMY_NAME: 'ROBOGEEX academy',   // يظهر بجانب الشعار
   APPS_SCRIPT_URL: '',              // رابط Google Apps Script بعد النشر (انظر README.md)
   CSV_URL: 'data/students.csv',     // ملف الأسماء
 };

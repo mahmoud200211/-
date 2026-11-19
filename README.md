@@ -21,7 +21,7 @@
 ## الخطوة 2: ربط الموقع بالجدول
 افتح `script.js` وعدّل أول سطرين في `CONFIG`:
 ```js
-ACADEMY_NAME: 'جيكس أكاديمي',
+ACADEMY_NAME: 'ROBOGEEX academy',
 APPS_SCRIPT_URL: 'الصق هنا رابط /exec',
 ```
 
