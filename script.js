@@ -1,11 +1,12 @@
 'use strict';
 /* ===================== الإعدادات (عدّل هنا فقط) ===================== */
 const CONFIG = {
-  VERSION: '4',                     // يظهر أسفل الصفحة؛ زِده عند كل تحديث (وغيّر ?v= في index.html)
+  VERSION: '5',                     // يظهر أسفل الصفحة؛ زِده عند كل تحديث (وغيّر ?v= في index.html)
   PROJECT_NAME: 'تقييم المدربين والطلاب في المساجد',
   ACADEMY_NAME: 'ROBOGEEX academy',   // يظهر بدل الشعار إذا تعذّر تحميله
   APPS_SCRIPT_URL: 'https://script.google.com/macros/s/AKfycbxwlUYloTVJyk6GtQGWaehq4zJw6EVI9ygcYN0-G2vcQCCZZu0vrhqV9HLezFbtxLQR/exec',
   CSV_URL: 'data/students.csv',     // ملف الأسماء
+  CODE_LENGTH: 4,                   // عدد أرقام الرمز (يجب أن يطابق CODE_LENGTH في Code.gs)
   // طلاب المدرب بعد إدخال الرمز: 'mosque' = كل طلاب مسجده، 'supervisor' = الطلاب المسجّل اسمه مشرفاً عليهم فقط
   STUDENTS_SCOPE: 'mosque',
 };
@@ -46,8 +47,8 @@ const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const norm = (s) => String(s || '').replace(/[ً-ٰٟـ]/g, '').replace(/[أإآ]/g, 'ا')
   .replace(/ة/g, 'ه').replace(/ى/g, 'ي').replace(/\s+/g, ' ').trim().toLowerCase();
-const normCode = (s) => String(s || '').replace(/[٠-٩]/g, (d) => '٠١٢٣٤٥٦٧٨٩'.indexOf(d)).toUpperCase().replace(/[^A-Z0-9]/g, '');
-const fmtCode = (s) => { const n = normCode(s).slice(0, 8); return n.length > 4 ? n.slice(0, 4) + '-' + n.slice(4) : n; };
+const normCode = (s) => String(s || '').replace(/[٠-٩]/g, (d) => '٠١٢٣٤٥٦٧٨٩'.indexOf(d)).replace(/\D/g, '').slice(0, CONFIG.CODE_LENGTH);
+const mosqueKey = (n) => String(n || '').trim().replace(/^(الجامع|جامع|مسجد)\s+/, '');
 const LS = {
   get(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } },
   set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* التخزين غير متاح */ } },
@@ -74,10 +75,11 @@ function parseCSV(t) {
 /* ===================== الحالة ===================== */
 let MOSQUES = [];             // [{ name, area, students:[{key,name,mosque,area,sup}] }]
 const MOS = {};               // اسم المسجد -> نفس الكائن
+const findMosque = (name) => MOS[name] || MOSQUES.find((m) => mosqueKey(m.name) === mosqueKey(name));
 const saved = LS.get('mev2', {});
 let store = { students: saved.students || {}, trainers: saved.trainers || {}, queue: saved.queue || [], session: saved.session || null };
 const persist = () => LS.set('mev2', store);
-const ui = { view: 'home', section: 'students', mosque: null, onlyPending: false, search: '', form: null, done: null };
+const ui = { view: 'home', section: 'students', onlyPending: false, search: '', form: null, done: null };
 
 /* ===================== تحميل البيانات ===================== */
 async function loadData() {
@@ -112,7 +114,7 @@ async function flush() {
   try {
     while (store.queue.length) {
       const it = store.queue[0];
-      const j = await api({ kind: it.kind, key: it.key, ...it.data, code: it.code || undefined });
+      const j = await api({ kind: it.kind, key: it.key, ...it.data, code: it.code });
       if (!j.ok) {
         if (['invalid_code', 'forbidden', 'bad_request'].includes(j.error)) {   // لن ينجح أبداً: نتخلص منه كي لا يعلق الباقي
           if (j.error === 'invalid_code' && store.session && store.session.code === it.code) store.session = null;
@@ -125,18 +127,9 @@ async function flush() {
   } catch (e) { /* سيُعاد المحاولة لاحقاً */ }
   flushing = false; updateBanner();
 }
-async function pullRemote() {
-  if (!CONFIG.APPS_SCRIPT_URL) return;
-  try {
-    const j = await (await fetch(CONFIG.APPS_SCRIPT_URL)).json();
-    for (const k of Object.keys(j.students || {})) if (!store.students[k]) store.students[k] = { remote: true };
-    persist();
-    if (ui.view === 'home' || ui.view === 'list') render();
-  } catch (e) { /* بدون إنترنت */ }
-}
 function updateBanner() {
   const b = $('#banner');
-  if (!CONFIG.APPS_SCRIPT_URL) { b.textContent = 'وضع تجريبي: التقييمات تُحفظ على هذا الجهاز فقط ولا تصل إلى الجدول.'; b.className = 'banner'; b.hidden = false; }
+  if (!CONFIG.APPS_SCRIPT_URL) { b.textContent = 'وضع تجريبي: الدخول والحفظ في الجدول غير مفعّلين.'; b.className = 'banner'; b.hidden = false; }
   else if (store.queue.length) { b.textContent = `⏳ ${store.queue.length} بانتظار الإرسال (سيُرسل تلقائياً عند توفر الإنترنت)`; b.className = 'banner warn'; b.hidden = false; }
   else b.hidden = true;
 }
@@ -144,13 +137,14 @@ function save(kind, key, data, code) {
   const rec = { ...data, time: new Date().toISOString() };
   (kind === 'student' ? store.students : store.trainers)[key] = rec;
   store.queue = store.queue.filter((q) => !(q.kind === kind && q.key === key));
-  store.queue.push({ kind, key, data: rec, code: code || null });
+  store.queue.push({ kind, key, data: rec, code });
   persist(); updateBanner(); flush();
 }
 
 /* ===================== دخول المدرب برمز ===================== */
 function applyLogin(j, code) {
-  store.session = { code: normCode(code), trainer: j.trainer, mosque: j.mosque };
+  const M = findMosque(j.mosque);
+  store.session = { code: normCode(code), trainer: j.trainer, mosque: M ? M.name : j.mosque };
   if (j.info) store.trainers[j.trainer] = { ...j.info };
   const queued = new Set(store.queue.filter((q) => q.kind === 'student').map((q) => q.key));
   for (const [k, v] of Object.entries(j.students || {})) if (!queued.has(k)) store.students[k] = v;
@@ -158,7 +152,7 @@ function applyLogin(j, code) {
 }
 const LOGIN_ERRORS = {
   invalid_code: 'الرمز غير صحيح. تأكد منه وأعد المحاولة.',
-  throttled: 'محاولات خاطئة كثيرة. انتظر عدة دقائق ثم أعد المحاولة.',
+  throttled: 'تم إيقاف الدخول مؤقتاً بسبب محاولات خاطئة كثيرة. حاول لاحقاً أو تواصل مع الأكاديمية.',
   network: 'تعذّر الاتصال بالإنترنت. تأكد من الاتصال وأعد المحاولة.',
   no_server: 'خدمة الدخول غير مفعّلة بعد.',
 };
@@ -179,27 +173,26 @@ async function refreshSession() {
   } catch (e) { /* بدون إنترنت: نبقى على آخر بيانات محفوظة */ }
 }
 function logout() {
-  if (store.session) delete store.trainers[store.session.trainer];   // لا نترك معلومات المدرب على جهاز مشترك
-  store.session = null; persist(); render();
+  store.session = null; store.students = {}; store.trainers = {};   // لا نترك بيانات على جهاز مشترك
+  persist(); resetAll();
 }
 
 /* ===================== التنقل ===================== */
-const parent = (v) => ({ list: 'home', form: ui.form && ui.form.from === 'list' ? 'list' : 'home', done: ui.done && ui.done.from === 'list' ? 'list' : 'home' }[v] || 'home');
-function render() { ({ home: viewHome, list: viewList, form: viewForm, done: viewDone }[ui.view])($('#app')); }
+function render() { ({ home: viewHome, form: viewForm, done: viewDone }[ui.view])($('#app')); }
 function go(view) { ui.view = view; render(); window.scrollTo(0, 0); }
-function back() { history.state && history.state.v ? history.back() : go(parent(ui.view)); }
+function back() { history.state && history.state.v ? history.back() : go('home'); }
 function resetAll() {
-  Object.assign(ui, { view: 'home', section: 'students', mosque: null, onlyPending: false, search: '', form: null, done: null });
+  Object.assign(ui, { view: 'home', section: 'students', onlyPending: false, search: '', form: null, done: null });
   go('home');
 }
 function myStudents() {
-  const s = store.session, M = s && MOS[s.mosque];
+  const s = store.session, M = s && findMosque(s.mosque);
   if (!M) return [];
   if (CONFIG.STUDENTS_SCOPE === 'supervisor') { const mine = M.students.filter((x) => x.sup.includes(s.trainer)); if (mine.length) return mine; }
   return M.students;
 }
 
-/* --- قائمة طلاب (تُستخدم في صفحة المسجد وفي صفحة المدرب) --- */
+/* --- قائمة طلاب المسجد --- */
 function studentBlock(list) {
   const done = list.filter((s) => store.students[s.key]).length, n = list.length;
   return `<div class="progress-line"><span>تم تقييم ${done} من ${n}</span><span>${n ? Math.round(done / n * 100) : 0}%</span></div>
@@ -215,65 +208,50 @@ function drawStudents(list) {
     const shown = list.filter((s) => norm(s.name).includes(q) && (!ui.onlyPending || !store.students[s.key]));
     $('#slist').innerHTML = shown.length ? shown.map((s) => {
       const ok = !!store.students[s.key];
-      return `<button class="row" data-act="student" data-key="${esc(s.key)}" data-m="${esc(s.mosque)}">
+      return `<button class="row" data-act="student" data-key="${esc(s.key)}">
         <span class="name">${esc(s.name)}</span><span class="badge ${ok ? 'ok' : ''}">${ok ? 'تم تقييمه ✓' : 'لم يُقيَّم'}</span></button>`;
     }).join('') : `<p class="empty">${q || ui.onlyPending ? 'لا يوجد طالب مطابق' : 'لا يوجد طلاب'}</p>`;
   };
   $('#sq').addEventListener('input', draw); draw();
 }
 
-/* --- الصفحة الأولى --- */
+/* --- الصفحة الأولى: قسمان، وكلاهما يتطلب رمز المدرب --- */
 const LOCK_SVG = '<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2.5"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>';
 function viewHome(app) {
   const stu = ui.section === 'students', s = store.session;
   let body = '';
-  if (stu) {
-    body = `<div class="sec-title">اختر المسجد لعرض طلابه</div><div class="list">${MOSQUES.map((m) => {
-      const done = m.students.filter((x) => store.students[x.key]).length, n = m.students.length;
-      return `<button class="mosque" data-act="mosque" data-m="${esc(m.name)}">
-        <span class="mtext"><span class="mname">${esc(m.name)}</span>
-          <span class="meta">${esc(m.area)} · ${n} طالب</span>
-          <span class="mprog"><span class="bar"><i style="width:${n ? done / n * 100 : 0}%"></i></span><span class="meta">تم تقييم ${done} من ${n}</span></span></span>
-        <span class="chev" aria-hidden="true">‹</span></button>`;
-    }).join('')}</div>`;
-  } else if (!s) {
+  if (!s) {
     body = `<div class="gate">
       <div class="lock">${LOCK_SVG}</div>
       <h2>دخول المدرب</h2>
-      <p class="sub">أدخل الرمز الخاص بك الذي أرسلته لك الأكاديمية (أحرف إنجليزية وأرقام).</p>
-      <input id="code" class="code-input" type="text" inputmode="text" autocapitalize="characters" autocomplete="off" autocorrect="off" spellcheck="false" maxlength="9" placeholder="XXXX-XXXX" aria-label="رمز الدخول">
+      <p class="sub">أدخل الرمز الخاص بك (${CONFIG.CODE_LENGTH} أرقام) الذي أرسلته لك الأكاديمية.</p>
+      <input id="code" class="code-input" type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="one-time-code" autocorrect="off" spellcheck="false" maxlength="${CONFIG.CODE_LENGTH}" placeholder="${'•'.repeat(CONFIG.CODE_LENGTH)}" aria-label="رمز الدخول">
       <div id="gerr" class="gate-err" role="alert" hidden></div>
       <button id="gbtn" class="btn" data-act="login">دخول</button></div>`;
   } else {
-    const M = MOS[s.mosque], mine = store.trainers[s.trainer];
-    body = `<div class="card who-card"><div><div class="meta">المدرب</div><div class="who-name">${esc(s.trainer)}</div><div class="meta">${esc(s.mosque)}</div></div>
-        <button class="link" data-act="logout">تسجيل الخروج</button></div>
-      <button class="row info-row" data-act="trainer-form"><span><span class="name">معلوماتي كمدرب</span><br><span class="meta">${mine ? 'تمت التعبئة، اضغط للتعديل' : 'لم تُعبّأ بعد'}</span></span>
-        <span class="badge ${mine ? 'ok' : ''}">${mine ? 'تم ✓' : 'مطلوب'}</span></button>
-      <div class="sec-title">طلاب ${esc(s.mosque)}</div>
-      ${M ? studentBlock(myStudents()) : '<p class="empty">لا توجد أسماء طلاب لهذا المسجد في الملف.</p>'}`;
+    const M = findMosque(s.mosque), mine = store.trainers[s.trainer];
+    body = `<div class="card who-card"><div><div class="meta">المدرب</div><div class="who-name">${esc(s.trainer)}</div><div class="meta">${esc(M ? M.name : s.mosque)}</div></div>
+        <button class="link" data-act="logout">تسجيل الخروج</button></div>`;
+    if (stu) {
+      body += M ? `<div class="sec-title">طلاب ${esc(M.name)}</div>${studentBlock(myStudents())}`
+        : '<p class="empty">لا توجد أسماء طلاب لهذا المسجد في الملف.</p>';
+    } else {
+      body += `<button class="row info-row" data-act="trainer-form"><span><span class="name">معلوماتي كمدرب</span><br><span class="meta">${mine ? 'تمت التعبئة، اضغط للتعديل' : 'لم تُعبّأ بعد'}</span></span>
+        <span class="badge ${mine ? 'ok' : ''}">${mine ? 'تم ✓' : 'مطلوب'}</span></button>`;
+    }
   }
   app.innerHTML = `
     <div class="seg" role="group" aria-label="القسم">${Object.entries(SECTIONS).map(([k, v]) =>
       `<button class="seg-btn ${ui.section === k ? 'on' : ''}" data-act="section" data-s="${k}">${v}</button>`).join('')}</div>
     ${body}<p class="ver">الإصدار ${esc(CONFIG.VERSION)}</p>`;
-  if (!stu && s && MOS[s.mosque]) drawStudents(myStudents());
-}
-
-/* --- قائمة طلاب مسجد (من الصفحة الأولى) --- */
-function viewList(app) {
-  const M = MOS[ui.mosque];
-  app.innerHTML = `
-    <button class="back" data-act="back">→ الرئيسية</button>
-    <h2>${esc(M.name)}</h2><p class="sub">${esc(M.area)}</p>${studentBlock(M.students)}`;
-  drawStudents(M.students);
+  if (s && stu && findMosque(s.mosque)) drawStudents(myStudents());
 }
 
 /* --- النماذج --- */
-function openForm(kind, key, mosque) {
+function openForm(kind, key) {
   const rec = kind === 'student' ? store.students[key] : store.trainers[store.session.trainer];
   const values = { ...(rec || {}) }; delete values.remote;
-  ui.form = { kind, key, mosque, values, from: ui.view === 'list' ? 'list' : 'home' };
+  ui.form = { kind, key, values };
   history.pushState({ v: 'form' }, '');
   go('form');
 }
@@ -294,15 +272,16 @@ function bodyHTML(f, v) {
 }
 function refreshField(f) { $(`[data-field="${f.id}"] .body`).innerHTML = bodyHTML(f, ui.form.values[f.id]); }
 function viewForm(app) {
-  const { kind, key, mosque, values } = ui.form;
+  const { kind, key, values } = ui.form, s = store.session;
   let html = '', lastGroup = null;
   for (const f of fieldsOf(ui.form)) {
     if (f.group && f.group !== lastGroup) html += `<div class="sec-title">${f.group}</div>`;
     lastGroup = f.group || null;
     html += `<div class="field ${f.group ? 'group-item' : ''}" data-field="${f.id}"><div class="lbl">${f.label}</div><div class="body">${bodyHTML(f, values[f.id])}</div></div>`;
   }
-  const title = kind === 'student' ? MOS[mosque].students.find((x) => x.key === key).name : 'معلومات عن المدرب';
-  const sub = kind === 'student' ? mosque : `${store.session.trainer} · ${store.session.mosque}`;
+  const M = findMosque(s.mosque);
+  const title = kind === 'student' ? M.students.find((x) => x.key === key).name : 'معلومات عن المدرب';
+  const sub = kind === 'student' ? M.name : `${s.trainer} · ${M ? M.name : s.mosque}`;
   app.innerHTML = `
     <div class="formtop"><button class="back" data-act="back">→ رجوع</button>
       <div class="who-name">${esc(title)}</div><div class="sub" style="margin:0">${esc(sub)}</div>
@@ -319,23 +298,20 @@ function updateProgress() {
   $('#submit').disabled = n < req.length;
 }
 function submitForm() {
-  const { kind, key, mosque, values, from } = ui.form;
+  const { kind, key, values } = ui.form, s = store.session, M = findMosque(s.mosque);
   const data = {};
   for (const f of fieldsOf(ui.form)) if (filled(values[f.id])) data[f.id] = values[f.id];
-  data.mosque = mosque;
-  const s = store.session; let code = null, k = key;
-  if (kind === 'student') {
-    const st = MOS[mosque].students.find((x) => x.key === key);
-    Object.assign(data, { area: st.area, student: st.name });
-    if (s && s.mosque === mosque) { code = s.code; data.trainer = s.trainer; }   // يُنسب لمدربه تلقائياً إن كان مسجّلاً دخوله
-  } else { code = s.code; data.trainer = s.trainer; k = s.trainer; data.mosque = s.mosque; }
-  save(kind, k, data, code);
-  ui.done = { kind, key: k, mosque, from };
+  data.trainer = s.trainer; data.mosque = M ? M.name : s.mosque;
+  let k = key;
+  if (kind === 'student') { const st = M.students.find((x) => x.key === key); Object.assign(data, { area: st.area, student: st.name }); }
+  else k = s.trainer;
+  save(kind, k, data, s.code);
+  ui.done = { kind, key: k };
   history.replaceState({ v: 'done' }, '');
   go('done');
 }
 function nextPending() {
-  const list = ui.done.from === 'home' ? myStudents() : MOS[ui.done.mosque].students, i = list.findIndex((s) => s.key === ui.done.key);
+  const list = myStudents(), i = list.findIndex((s) => s.key === ui.done.key);
   return list.slice(i + 1).concat(list.slice(0, i + 1)).find((s) => !store.students[s.key]);
 }
 function viewDone(app) {
@@ -347,7 +323,7 @@ function viewDone(app) {
     <p class="sub">${offline ? 'سيُرسل إلى الجدول تلقائياً عند توفر الاتصال.' : 'شكراً لك، وصلت البيانات إلى الجدول.'}</p>
     <div class="stack">
       ${next ? `<button class="btn" data-act="next" data-key="${esc(next.key)}">تقييم الطالب التالي: ${esc(next.name)}</button>` : ''}
-      <button class="btn ${next ? 'alt' : ''}" data-act="back">${isStudent && ui.done.from === 'list' ? 'العودة إلى قائمة الطلاب' : 'العودة'}</button></div></div>`;
+      <button class="btn ${next ? 'alt' : ''}" data-act="back">${isStudent ? 'العودة إلى قائمة الطلاب' : 'العودة'}</button></div></div>`;
 }
 
 /* ===================== الأحداث ===================== */
@@ -356,7 +332,7 @@ async function doLogin() {
   const code = normCode(input.value);
   const show = (m) => { err.textContent = m; err.hidden = false; input.classList.remove('bad'); void input.offsetWidth; input.classList.add('bad'); };
   err.hidden = true;
-  if (code.length < 8) return show('أدخل الرمز كاملاً (8 خانات).');
+  if (code.length < CONFIG.CODE_LENGTH) return show(`أدخل الرمز كاملاً (${CONFIG.CODE_LENGTH} أرقام).`);
   btn.disabled = true; btn.textContent = 'جارٍ التحقق…';
   const j = await login(code);
   if (j.ok) { render(); return; }
@@ -369,15 +345,14 @@ document.addEventListener('click', (e) => {
   switch (d.act) {
     case 'reset': resetAll(); break;
     case 'section': ui.section = d.s; ui.search = ''; ui.onlyPending = false; render(); break;
-    case 'mosque': ui.mosque = d.m; ui.search = ''; ui.onlyPending = false; history.pushState({ v: 'list' }, ''); go('list'); break;
     case 'pending': ui.onlyPending = !ui.onlyPending; render(); break;
-    case 'student': openForm('student', d.key, d.m); break;
-    case 'trainer-form': openForm('trainer', null, store.session.mosque); break;
+    case 'student': openForm('student', d.key); break;
+    case 'trainer-form': openForm('trainer', null); break;
     case 'login': doLogin(); break;
     case 'logout': logout(); break;
     case 'back': back(); break;
     case 'next':
-      ui.form = { kind: 'student', key: d.key, mosque: ui.done.mosque, from: ui.done.from, values: { ...(store.students[d.key] || {}) } };
+      ui.form = { kind: 'student', key: d.key, values: { ...(store.students[d.key] || {}) } };
       delete ui.form.values.remote;
       history.replaceState({ v: 'form' }, ''); go('form'); break;
     case 'set': {
@@ -401,15 +376,15 @@ document.addEventListener('click', (e) => {
     case 'submit': submitForm(); break;
   }
 });
-document.addEventListener('input', (e) => { if (e.target.id === 'code') e.target.value = fmtCode(e.target.value); });
+document.addEventListener('input', (e) => { if (e.target.id === 'code') e.target.value = normCode(e.target.value); });
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Enter' || !e.target.id && !(e.target.dataset && e.target.dataset.own)) return;
   e.preventDefault();
   if (e.target.id === 'code') doLogin();
   else if (e.target.dataset.own) e.target.closest('.own').querySelector('[data-act="add-own"]').click();
 });
-window.addEventListener('popstate', () => { if (ui.view !== 'home') go(parent(ui.view)); });
-window.addEventListener('online', () => { flush(); pullRemote(); refreshSession(); });
+window.addEventListener('popstate', () => { if (ui.view !== 'home') go('home'); });
+window.addEventListener('online', () => { flush(); refreshSession(); });
 
 /* ===================== البدء ===================== */
 (async function init() {
@@ -418,5 +393,5 @@ window.addEventListener('online', () => { flush(); pullRemote(); refreshSession(
   updateBanner();
   try { await loadData(); }
   catch (e) { $('#app').innerHTML = '<p class="empty">تعذّر تحميل ملف الأسماء (data/students.csv).<br>إذا فتحت الملف مباشرة من الجهاز، انشره على GitHub Pages أو شغّل خادماً محلياً.</p>'; return; }
-  render(); flush(); pullRemote(); refreshSession();
+  render(); flush(); refreshSession();
 })();

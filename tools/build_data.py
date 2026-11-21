@@ -3,6 +3,10 @@
 # الأعمدة الناتجة: المسجد، المنطقة، الطالب، المشرف (عدة مشرفين تُفصل بـ |)
 import sys, csv, re, openpyxl
 
+# تصحيحات ثابتة: اسم المسجد كما يظهر، ومشرف المسجد إذا كان فارغاً في الإكسل
+RENAME = {"الحسنين": "مسجد الحسنين"}
+DEFAULT_SUPERVISOR = {"جامع القدم الكبير": "محمود خاروف"}
+
 src = sys.argv[1]
 out = sys.argv[2] if len(sys.argv) > 2 else "data/students.csv"
 wb = openpyxl.load_workbook(src, data_only=True)
@@ -15,7 +19,8 @@ for ws in wb:
         if not name:
             continue
         mosque = mosque or clean(ws.title)
-        sups = [clean(x) for x in re.split(r"[،,]", sup) if clean(x)]
+        mosque = RENAME.get(mosque, mosque)
+        sups = [clean(x) for x in re.split(r"[،,]", sup) if clean(x)] or ([DEFAULT_SUPERVISOR[mosque]] if mosque in DEFAULT_SUPERVISOR else [])
         rows.append((mosque, area, name, sups))  # كل صف طالب مستقل، حتى لو تكرر الاسم
 with open(out, "w", newline="", encoding="utf-8-sig") as f:
     w = csv.writer(f)

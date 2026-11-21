@@ -98,9 +98,9 @@ h2{font-size:1.2rem;margin:0 0 2px}
 .gate{background:var(--card);border:1px solid var(--line);border-radius:20px;padding:24px 18px;text-align:center;margin-top:18px}
 .gate .lock{width:60px;height:60px;border-radius:50%;background:var(--brand-soft);color:var(--brand);display:flex;align-items:center;justify-content:center;margin:0 auto 12px}
 .gate .sub{margin-bottom:16px}
-.code-input{width:100%;text-align:center;direction:ltr;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:1.7rem;font-weight:700;
-  letter-spacing:.18em;padding:14px 8px;border:2px solid var(--line);border-radius:14px;background:#fff;outline:none;text-transform:uppercase}
-.code-input::placeholder{color:#d9c7b8;letter-spacing:.12em}
+.code-input{width:100%;text-align:center;direction:ltr;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:2rem;font-weight:700;
+  letter-spacing:.5em;text-indent:.5em;padding:14px 8px;border:2px solid var(--line);border-radius:14px;background:#fff;outline:none;text-transform:uppercase}
+.code-input::placeholder{color:#d9c7b8;letter-spacing:.5em}
 .code-input:focus{border-color:var(--brand-2)}
 .code-input.bad{border-color:#c92a2a;animation:shake .35s}
 @keyframes shake{25%{transform:translateX(6px)}75%{transform:translateX(-6px)}}

@@ -7,10 +7,11 @@
  *   "الرموز"            رمز كل مسجد ومدربه (سرّية، لا تُرسل أبداً إلى الموقع)
  *
  * طريقة التشغيل أول مرة: اختر الدالة setupCodes من القائمة أعلى المحرر ثم اضغط "تشغيل".
- * ستظهر الرموز الخمسة في ورقة "الرموز".
+ * ستظهر الرموز (4 أرقام لكل مدرب) في ورقة "الرموز".
  *
  * لإضافة مسجد أو مدرب جديد: أضف صفاً في ورقة "الرموز" (المسجد + المدرب) واترك خانة الرمز فارغة،
  * ثم شغّل setupCodes ليُولَّد له رمز. لإيقاف رمز اكتب "لا" في عمود "مفعّل".
+ * إذا توقف الدخول مؤقتاً بسبب محاولات خاطئة كثيرة: شغّل الدالة clearLock.
  */
 
 const STUDENT_COLS = [ // [الحقل، عنوان العمود]
@@ -33,28 +34,42 @@ const CODES_SHEET = 'الرموز';
 const CODES_HEADERS = ['الرمز', 'المسجد', 'المدرب', 'مفعّل'];
 // القيم الابتدائية فقط (أسماء المساجد والمدربين). عدّلها لاحقاً من ورقة "الرموز" مباشرة.
 const DEFAULT_ASSIGNMENTS = [
-  ['جامع القدم الكبير', 'مدرب جامع القدم الكبير'],
+  ['جامع القدم الكبير', 'محمود خاروف'],
   ['مسجد الإيمان', 'محمد رفاعي'],
   ['مسجد الأنصار', 'عبد الوهاب ناصر'],
   ['مسجد الصحابة', 'محمد صالح الدخيل'],
-  ['الحسنين', 'محمد عَرَّاط'],
+  ['مسجد الحسنين', 'محمد عَرَّاط'],
 ];
-const MAX_FAILS = 40;            // محاولات رمز خاطئة مسموحة خلال 10 دقائق قبل التوقف المؤقت
-const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // بلا أحرف متشابهة (0/O و1/I)
+// أسماء قديمة تُصحَّح تلقائياً عند تشغيل setupCodes
+const LEGACY_MOSQUES = { 'الحسنين': 'مسجد الحسنين' };
+const LEGACY_TRAINERS = { 'مدرب جامع القدم الكبير': 'محمود خاروف' };
+
+const CODE_LENGTH = 4;           // عدد أرقام الرمز. للأمان الأعلى اجعله 6.
+const MAX_FAILS_SHORT = 15;      // محاولات خاطئة مسموحة خلال 10 دقائق
+const MAX_FAILS_LONG = 60;       // محاولات خاطئة مسموحة خلال 6 ساعات
 
 /* ===================== الرموز ===================== */
-function normCode_(c) {
-  const digits = '٠١٢٣٤٥٦٧٨٩';
-  return String(c || '').replace(/[٠-٩]/g, d => String(digits.indexOf(d))).toUpperCase().replace(/[^A-Z0-9]/g, '');
+function latinDigits_(s) {
+  const ar = '٠١٢٣٤٥٦٧٨٩';
+  return String(s == null ? '' : s).replace(/[٠-٩]/g, d => String(ar.indexOf(d)));
+}
+
+// ما يكتبه المدرب: نُبقي الأرقام فقط
+function normInput_(c) { return latinDigits_(c).replace(/\D/g, ''); }
+
+// ما في خانة الرمز في الجدول: يُقبل فقط إن كان أرقاماً بالطول المطلوب بالضبط
+function cellCode_(v) {
+  const s = latinDigits_(v).trim();
+  return new RegExp('^\\d{' + CODE_LENGTH + '}$').test(s) ? s : '';
 }
 
 function newCode_() {
-  const hex = Utilities.getUuid().replace(/-/g, '');
-  const pool = hex.slice(0, 12) + hex.slice(13, 16) + hex.slice(17);   // نتجاوز خانتي النسخة والنوع (غير عشوائيتين)
-  let out = '';
-  for (let i = 0; i < 8; i++) out += CODE_ALPHABET[parseInt(pool.substr(i * 2, 2), 16) % 32];
-  return out.slice(0, 4) + '-' + out.slice(4);
+  const n = parseInt(Utilities.getUuid().replace(/-/g, '').slice(0, 8), 16);
+  return String(n % Math.pow(10, CODE_LENGTH)).padStart(CODE_LENGTH, '0');
 }
+
+// يطابق "مسجد الحسنين" مع "الحسنين" و"جامع القدم" مع "القدم"
+function mosqueKey_(n) { return String(n == null ? '' : n).trim().replace(/^(الجامع|جامع|مسجد)\s+/, ''); }
 
 function codesSheet_() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -62,39 +77,47 @@ function codesSheet_() {
   if (!sh) {
     sh = ss.insertSheet(CODES_SHEET);
     sh.getRange(1, 1, 1, 4).setValues([CODES_HEADERS]).setFontWeight('bold').setBackground('#fde0c8');
-    sh.getRange(1, 1, 500, 1).setNumberFormat('@');   // الرمز نص دائماً
+    sh.getRange(1, 1, 500, 1).setNumberFormat('@');   // الرمز نص دائماً (كي لا يُحذف الصفر من أوله)
     sh.setFrozenRows(1);
     sh.setRightToLeft(true);
   }
   return sh;
 }
 
-/** شغّلها يدوياً: تنشئ ورقة الرموز وتولّد رمزاً لكل صف بلا رمز. آمنة للتكرار. */
+/** شغّلها يدوياً: تنشئ ورقة الرموز، وتصحّح الأسماء القديمة، وتولّد رمزاً لكل صف بلا رمز صالح. آمنة للتكرار. */
 function setupCodes() {
   const sh = codesSheet_();
   if (sh.getLastRow() < 2) DEFAULT_ASSIGNMENTS.forEach(a => sh.appendRow(['', a[0], a[1], 'نعم']));
   const last = sh.getLastRow();
   const rows = sh.getRange(2, 1, last - 1, 4).getValues();
-  const used = rows.map(r => normCode_(r[0])).filter(Boolean);
   rows.forEach((r, i) => {
-    if (normCode_(r[0]) || !String(r[1]).trim()) return;
-    let c;
-    do { c = newCode_(); } while (used.indexOf(normCode_(c)) >= 0);
-    used.push(normCode_(c));
-    sh.getRange(i + 2, 1).setValue(c);
+    const m = LEGACY_MOSQUES[String(r[1]).trim()], t = LEGACY_TRAINERS[String(r[2]).trim()];
+    if (m) sh.getRange(i + 2, 2).setValue(m);
+    if (t) sh.getRange(i + 2, 3).setValue(t);
+  });
+  const taken = {};
+  rows.forEach(r => { const c = cellCode_(r[0]); if (c) taken[c] = 0; });
+  rows.forEach((r, i) => {
+    if (!String(r[1]).trim()) return;
+    const c = cellCode_(r[0]);
+    if (c && taken[c] === 0) { taken[c] = 1; return; }          // رمز صالح وغير مكرر
+    let n;
+    do { n = newCode_(); } while (n in taken);                  // رمز فارغ أو قديم الشكل أو مكرر: نولّد بديلاً
+    taken[n] = 1;
+    sh.getRange(i + 2, 1).setValue(n);
   });
 }
 
 function findCode_(code) {
-  const n = normCode_(code);
-  if (n.length < 6) return null;                       // يمنع مطابقة الخانات الفارغة
+  const n = normInput_(code);
+  if (n.length !== CODE_LENGTH) return null;
   const sh = codesSheet_();
   const last = sh.getLastRow();
   if (last < 2) return null;
   const rows = sh.getRange(2, 1, last - 1, 4).getValues();
   for (let i = 0; i < rows.length; i++) {
     const r = rows[i];
-    if (normCode_(r[0]) === n && String(r[3]).trim() !== 'لا' && String(r[1]).trim() && String(r[2]).trim()) {
+    if (cellCode_(r[0]) === n && String(r[3]).trim() !== 'لا' && String(r[1]).trim() && String(r[2]).trim()) {
       return { mosque: String(r[1]).trim(), trainer: String(r[2]).trim() };
     }
   }
@@ -103,14 +126,19 @@ function findCode_(code) {
 
 function auth_(code) {
   const cache = CacheService.getScriptCache();
-  if (Number(cache.get('fails') || 0) >= MAX_FAILS) return { error: 'throttled' };
+  const s = Number(cache.get('fails_s') || 0), l = Number(cache.get('fails_l') || 0);
+  if (s >= MAX_FAILS_SHORT || l >= MAX_FAILS_LONG) return { error: 'throttled' };
   const who = findCode_(code);
   if (!who) {
-    cache.put('fails', String(Number(cache.get('fails') || 0) + 1), 600);
+    cache.put('fails_s', String(s + 1), 600);
+    cache.put('fails_l', String(l + 1), 21600);
     return { error: 'invalid_code' };
   }
   return { who: who };
 }
+
+/** شغّلها يدوياً لفك الإيقاف المؤقت للدخول بعد محاولات خاطئة كثيرة. */
+function clearLock() { CacheService.getScriptCache().removeAll(['fails_s', 'fails_l']); }
 
 /* ===================== مساعدات الأوراق ===================== */
 function getSheet_(kind) {
@@ -175,7 +203,7 @@ function studentsOf_(mosque) {
   if (last < 2) return out;
   g.sh.getRange(2, 1, last - 1, g.cfg.cols.length).getValues().forEach(r => {
     const o = rowToObj_(g.cfg, r);
-    if (String(o.mosque) === mosque) out[o.key] = o;
+    if (mosqueKey_(o.mosque) === mosqueKey_(mosque)) out[o.key] = o;
   });
   return out;
 }
@@ -187,37 +215,29 @@ function doPost(e) {
   try {
     const d = JSON.parse(e.postData.contents);
 
+    // كل العمليات تتطلب رمزاً صحيحاً
+    if (['login', 'trainer', 'student'].indexOf(d.kind) < 0) return json_({ ok: false, error: 'bad_request' });
+    const a = auth_(d.code);
+    if (a.error) return json_({ ok: false, error: a.error });
+
     if (d.kind === 'login') {
-      const a = auth_(d.code);
-      if (a.error) return json_({ ok: false, error: a.error });
       return json_({ ok: true, trainer: a.who.trainer, mosque: a.who.mosque,
         info: trainerInfo_(a.who.trainer), students: studentsOf_(a.who.mosque) });
     }
 
     if (d.kind === 'trainer') {
-      const a = auth_(d.code);
-      if (a.error) return json_({ ok: false, error: a.error });
       d.trainer = a.who.trainer;                       // الاسم والمسجد من الرمز فقط، وليس من العميل
       d.mosque = a.who.mosque;
       upsert_('trainer', d);
       return json_({ ok: true });
     }
 
-    if (d.kind === 'student') {
-      if (!d.key || !d.mosque || String(d.key).indexOf(d.mosque + '|') !== 0) return json_({ ok: false, error: 'bad_request' });
-      if (d.code) {
-        const a = auth_(d.code);
-        if (a.error) return json_({ ok: false, error: a.error });
-        if (a.who.mosque !== String(d.mosque)) return json_({ ok: false, error: 'forbidden' });
-        d.trainer = a.who.trainer;
-      } else {
-        d.trainer = '';                                // تقييم بلا رمز: لا يُنسب لمدرب
-      }
-      upsert_('student', d);
-      return json_({ ok: true });
-    }
-
-    return json_({ ok: false, error: 'bad_request' });
+    // student
+    if (!d.key || !d.mosque || String(d.key).indexOf(d.mosque + '|') !== 0) return json_({ ok: false, error: 'bad_request' });
+    if (mosqueKey_(a.who.mosque) !== mosqueKey_(d.mosque)) return json_({ ok: false, error: 'forbidden' });
+    d.trainer = a.who.trainer;
+    upsert_('student', d);
+    return json_({ ok: true });
   } catch (err) {
     return json_({ ok: false, error: 'server_error' });
   } finally {
@@ -225,13 +245,7 @@ function doPost(e) {
   }
 }
 
-// عام: يُرجع مفاتيح الطلاب المقيَّمين فقط (ليظهر "تم تقييمه")، بلا درجات ولا أسماء مدربين
+// لا يُرجع أي بيانات: كل شيء يتطلب رمزاً عبر doPost
 function doGet(e) {
-  const out = { students: {} };
-  const g = getSheet_('student'), last = g.sh.getLastRow();
-  if (last > 1) {
-    const keyIdx = g.cfg.cols.findIndex(c => c[0] === 'key');
-    g.sh.getRange(2, keyIdx + 1, last - 1, 1).getValues().forEach(r => { if (r[0]) out.students[String(r[0])] = 1; });
-  }
-  return json_(out);
+  return json_({ ok: true });
 }
